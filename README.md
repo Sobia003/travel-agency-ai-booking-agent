@@ -26,4 +26,4 @@ A Stripe webhook workflow that processes successful payments, updates booking st
 - JavaScript
 - AI Agents
 - n8n Data Tables
-- 
+  
