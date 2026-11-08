@@ -1,0 +1,495 @@
+{
+  "name": "Travel Agency AI Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "0481e0e2-c187-4ced-b4f2-9ae99c91f4f7",
+      "name": "When chat message received"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "You are a friendly AI assistant for a travel agency.\n\nYour responsibilities:\n- Answer customers' questions about travel packages, destinations, trip duration, prices, and activities.\n- Help customers choose a suitable tour.\n- Ask for missing information politely, one question at a time.\n- Never invent tour packages, prices, available seats, or booking information.\n- Do not claim that a tour is available until the availability tool has verified it.\n- Do not claim that a booking is confirmed until the payment has been successfully verified.\n- If you do not have reliable information, tell the customer honestly.\n\nFor now, you are in the initial testing stage. You can answer general travel questions, but you must not claim to access live tour availability or make bookings until the relevant tools are connected.\n\nKeep your answers clear, helpful, and concise.\n\nWhen a customer asks about available tours, destinations, durations, or prices, call the Tours tool first. Base your answer on the records returned by the tool. If no matching tour is found, say so honestly. Never invent tour names or prices.\n\nWhen a customer asks about travel dates or seat availability, use the Check Tour Slots tool. Match both the tour and requested date. Calculate remaining seats from the returned values. Do not invent availability. If the requested date is missing, ask the customer which date they prefer.\n\n### Booking creation rules\n\nWhen a customer wants to book a tour:\n\n1. Use the Tours tool to identify the correct tour and obtain its actual tour ID, price per person, and currency.\n2. Ask for any missing information: customer's full name, email address, preferred travel date, and number of travelers.\n3. Use the Check Tour Slots tool to check the requested tour and date. Calculate remaining seats as total seats minus booked seats.\n4. Never create a booking if the requested date is unavailable or there are insufficient seats.\n5. Calculate the total amount using the actual price per person multiplied by the number of travelers. Never invent prices.\n6. Before creating a booking, summarize the selected tour, date, number of travelers, total amount, and customer details. Ask the customer to confirm.\n7. Only after the customer confirms, use the Create Booking tool to insert a record.\n8. Set the booking status to Pending Payment. Never mark a booking as confirmed before successful payment verification.\n9. Generate a unique booking ID for each booking. Never reuse an existing booking ID.\n10. Never claim a booking was created unless the Create Booking tool succeeds.\n11. Do not create duplicate bookings if the customer repeats a message or asks a follow-up question about the same booking.\n\nWhen processing payment for an existing booking:\n1. Use the Get Booking for Payment tool to retrieve the booking by its booking_id.\n2. Use only the retrieved booking's saved customer_email, total_amount, currency, tour_id, travel_date, and status.\n3. Continue only if the booking exists and its status is exactly \"Pending Payment\".\n4. Pass the saved booking_id, customer_email, currency, total_amount, and tour name/travel date to the Create Stripe Checkout Session tool.\n5. Never invent or estimate booking details, and never create a new booking when processing payment for an existing booking.\n6. After creating the checkout session, return the Stripe checkout URL and booking ID to the customer. Do not mark the booking as paid or confirmed; payment must be verified separately.\n\nPAYMENT EMAIL PROCESS:\n\nWhen a customer asks to pay for an existing booking:\n1. Retrieve the booking using Get Booking for Payment.\n2. Verify the booking exists and its status is Pending Payment.\n3. Create a Stripe Checkout Session using the saved booking details.\n4. Read the actual \"url\" returned by Create Stripe Checkout Session.\n5. Send the booking email using the Gmail tool. Include the actual Stripe checkout URL returned in step 4.\n6. Include the booking ID, tour, travel date, number of travelers, total amount, and currency in the email.\n7. Never invent, modify, or replace the Stripe checkout URL.\n8. Tell the customer the email was sent only after the Gmail tool succeeds.\n9. Do not create a new booking when the customer asks to pay for an existing booking.\n10. Never claim the booking is confirmed until the payment-confirmation workflow verifies payment.\n\nWhen creating a new booking, use `booking_total_amount` for the total amount being saved in the new booking record. When processing payment for an existing booking, first retrieve that booking using its booking ID, then use its saved `total_amount`, `currency`, and `customer_email` values. Use `booking_id` as the Stripe client reference ID. Never use a payment amount as a booking ID.\n\nNever invent, fabricate, or return a placeholder Stripe checkout URL. When a customer requests payment, you must first retrieve their existing booking from the Bookings table and call the Create Stripe Checkout Session tool using the saved booking details. Return only the actual checkout URL returned by that tool. If the tool fails or does not return a real checkout URL, explain that payment-link creation failed and do not claim that a payment link was created."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        672,
+        0
+      ],
+      "id": "e295e880-bd7d-48f0-b898-46157b8b6ee3",
+      "name": "AI Agent",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "56bda493-0e07-4462-8fdd-7f002f2520b4",
+              "name": "output",
+              "value": "={{ $json.output.replace(/\\\\n/g, '\\n') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1456,
+        0
+      ],
+      "id": "84bc8a68-008a-4224-af2b-c489ac1b6180",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Search the Tours table for available travel packages. Use this tool whenever a customer asks about tours, destinations, duration, or prices. Return only tours marked active. Never invent a tour or its price. If no matching tour is found, explain that no matching package was found.",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "IYwEIh813uWQsCmK",
+          "mode": "list",
+          "cachedResultName": "Tours"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "active",
+              "condition": "isTrue"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTableTool",
+      "typeVersion": 1.1,
+      "position": [
+        336,
+        224
+      ],
+      "id": "e38a7be7-3c9b-4bf4-b2d1-6a1d2bc5f88d",
+      "name": "Get row(s) in Data table"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Check travel departure slots in the TourSlots table. Use this tool whenever a customer asks about available travel dates or seats. Match the requested tour ID and travel date against the returned records. Calculate available seats as total_seats minus booked_seats. Never claim a slot is available without checking the records. A slot is suitable only if it is active and has enough seats for the customer's requested number of travelers.",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "URp1ya1ZOTZpz7mw",
+          "mode": "list",
+          "cachedResultName": "TourSlots"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "active",
+              "condition": "isTrue"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTableTool",
+      "typeVersion": 1.1,
+      "position": [
+        512,
+        224
+      ],
+      "id": "e6a7c317-6771-4ac7-8c71-f9487bb693c9",
+      "name": "Check Tour Slots"
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "pFepQ6w1ZTqi2lwH",
+          "mode": "list",
+          "cachedResultName": "Bookings"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "booking_id": "={{ $fromAI('booking_id', ``, 'string') }}",
+            "customer_name": "={{ $fromAI('customer_name', ``, 'string') }}",
+            "customer_email": "={{ $fromAI('customer_email', ``, 'string') }}",
+            "tour_id": "={{ $fromAI('tour_id', ``, 'string') }}",
+            "travel_date": "={{ $fromAI('travel_date', ``, 'string') }}",
+            "travelers": "={{ $fromAI('travelers', ``, 'number') }}",
+            "total_amount": "={{ $fromAI('booking_total_amount', '', 'number') }}",
+            "currency": "={{ $fromAI('currency', ``, 'string') }}",
+            "status": "={{ $fromAI('status', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "booking_id",
+              "displayName": "booking_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "customer_name",
+              "displayName": "customer_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "customer_email",
+              "displayName": "customer_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "tour_id",
+              "displayName": "tour_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "travel_date",
+              "displayName": "travel_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "travelers",
+              "displayName": "travelers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "total_amount",
+              "displayName": "total_amount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "currency",
+              "displayName": "currency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTableTool",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        224
+      ],
+      "id": "9ae0fc5f-36e0-4d46-bd76-470e7598845a",
+      "name": "Insert row in Data table"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        160,
+        224
+      ],
+      "id": "b87a5ee0-8a43-41a0-adeb-05c146bf0048",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Create a Stripe Checkout Session for an existing booking only. Before creating the session, use Get Booking for Payment to retrieve the booking by its exact booking_id. Use the saved booking's total_amount, currency, customer_email, and booking_id. Never invent or modify the amount. Only create a payment session for a booking that exists and has status Pending Payment. The booking total is in major currency units, so convert it to the currency's smallest unit as required by Stripe. Return the Checkout Session URL and booking ID to the customer.",
+        "method": "POST",
+        "url": "https://api.stripe.com/v1/checkout/sessions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "stripeApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "mode",
+              "value": "payment"
+            },
+            {
+              "name": "success_url",
+              "value": "https://example.com/success?session_id={CHECKOUT_SESSION_ID}"
+            },
+            {
+              "name": "cancel_url",
+              "value": "https://example.com/cancel"
+            },
+            {
+              "name": "line_items[0][quantity]",
+              "value": "1"
+            },
+            {
+              "name": "client_reference_id",
+              "value": "={{ $fromAI('booking_id', 'The ID of the existing booking from the Bookings table', 'string') }}"
+            },
+            {
+              "name": "customer_email",
+              "value": "={{ $fromAI('customer_email', 'The email address saved in the existing booking record', 'string') }}"
+            },
+            {
+              "name": "line_items[0][price]",
+              "value": "YOUR_STRIPE_PRICE_ID"
+            }
+          ]
+        },
+        "options": {},
+        "optimizeResponse": true,
+        "fieldsToInclude": "selected",
+        "fields": "id,url, client_reference_id"
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        1072,
+        224
+      ],
+      "id": "f796bd46-77b4-45ce-896d-8a9472a4273a",
+      "name": "Create Stripe Checkout Session"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Retrieve an existing booking from the Bookings table using its exact booking_id. Use this tool before creating a payment session. Only use the saved total_amount, currency, customer_email, and booking_id from the returned record. Never invent or alter payment amounts.",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "pFepQ6w1ZTqi2lwH",
+          "mode": "list",
+          "cachedResultName": "Bookings"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "booking_id",
+              "keyValue": "={{ $fromAI('conditions0_Value', `The ID of the existing booking to retrieve`, 'string') }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTableTool",
+      "typeVersion": 1.1,
+      "position": [
+        1280,
+        224
+      ],
+      "id": "b504eaaf-153b-44f7-9122-41b31eff4f82",
+      "name": "Get Booking for Payment"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $fromAI('customer_email', 'The customer email address saved in the existing booking record', 'string') }}",
+        "subject": "Payment Required – Your Travel Booking",
+        "message": "=<p>Hello {{ $fromAI('customer_name', 'Customer name from the saved booking', 'string') }},</p>\n\n<p>Thank you for booking a tour with us!</p>\n\n<p>Here are your tour booking details:</p>\n\n<p><strong>Booking ID:</strong> {{ $fromAI('booking_id', 'Booking ID from the saved booking', 'string') }}<br>\n<strong>Tour:</strong> {{ $fromAI('tour_name', 'Tour name from the booking details', 'string') }}<br>\n<strong>Travel Date:</strong> {{ $fromAI('travel_date', 'Travel date from the saved booking', 'string') }}<br>\n<strong>Number of Travelers:</strong> {{ $fromAI('travelers', 'Number of travelers from the saved booking', 'number') }}<br>\n<strong>Total Amount:</strong> {{ $fromAI('total_amount', 'Total amount from the saved booking', 'number') }} {{ $fromAI('currency', 'Currency from the saved booking', 'string') }}<br>\n<strong>Payment Status:</strong> Pending Payment</p>\n\n<p>Please complete your payment using the link below:</p>\n\n<p><a href=\"{{ $fromAI('checkout_url', 'Stripe Checkout URL returned by Create Stripe Checkout Session', 'string') }}\">Click here to pay securely</a></p>\n\n<p>Your booking will be confirmed once your payment has been successfully verified.</p>\n\n<p>Thank you for choosing our travel agency!</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        1504,
+        224
+      ],
+      "id": "a7183be0-0c70-451b-b635-91a73f2319db",
+      "name": "Send a message in Gmail"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        32,
+        224
+      ],
+      "id": "d2818ec9-4300-45de-9fdc-a2ea0590e1f5",
+      "name": "Google Gemini Chat Model"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in Data table": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Tour Slots": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert row in Data table": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Stripe Checkout Session": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Booking for Payment": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message in Gmail": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "nodeGroups": [],
+  "tags": []
+}
